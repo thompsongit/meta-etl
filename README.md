@@ -39,17 +39,16 @@ For direct Instagram Login mode (`graph.instagram.com`), expected ETL scopes are
 - optional for comments: `instagram_business_manage_comments`
 
 ### 5) Run sync
-These should be present in in the .env file
+Auto-loads env from `.prod.env` 
+
+Run directly:
 ```bash
-IG_GRAPH_TOKEN='...' \
-IG_USER_ID='...' \
-CH_HOST='...' \
-CH_PORT='8123' \
-CH_USER='...' \
-CH_PASSWORD='...' \
-CH_DATABASE='...' \
-COMMENTS_MEDIA_SCAN_LIMIT='200' \
 python src/ig_etl_sync.py
+```
+
+Or force a specific env file:
+```bash
+python src/ig_etl_sync.py --env-file /absolute/path/to/.prod.env
 ```
 
 ### Sync behavior

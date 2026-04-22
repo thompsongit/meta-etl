@@ -39,36 +39,6 @@ ORDER BY (account_id, stream, started_at, run_id);
 -- -----------------------------------------------------------------------------
 -- Raw append-only tables (API payload normalized + payload_json)
 -- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS raw_fb_pages
-(
-    page_id String,
-    page_name Nullable(String),
-    tasks Array(String),
-    instagram_business_account_id Nullable(String),
-    source_fetched_at DateTime64(3, 'UTC'),
-    payload_json String,
-    run_id String,
-    ingested_at DateTime64(3, 'UTC') DEFAULT now64(3)
-)
-ENGINE = MergeTree
-PARTITION BY toYYYYMM(ingested_at)
-ORDER BY (page_id, ingested_at);
-
-CREATE TABLE IF NOT EXISTS raw_page_ig_binding
-(
-    page_id String,
-    page_name Nullable(String),
-    instagram_business_account_id Nullable(String),
-    instagram_username Nullable(String),
-    source_fetched_at DateTime64(3, 'UTC'),
-    payload_json String,
-    run_id String,
-    ingested_at DateTime64(3, 'UTC') DEFAULT now64(3)
-)
-ENGINE = MergeTree
-PARTITION BY toYYYYMM(ingested_at)
-ORDER BY (page_id, ingested_at);
-
 CREATE TABLE IF NOT EXISTS raw_ig_user_profile
 (
     ig_user_id String,
