@@ -1,5 +1,5 @@
-CREATE DATABASE IF NOT EXISTS instagram_raw;
-USE instagram_raw;
+CREATE DATABASE IF NOT EXISTS instagram_etl;
+USE instagram_etl;
 
 -- -----------------------------------------------------------------------------
 -- Internal pipeline control/state tables
@@ -170,7 +170,15 @@ CREATE TABLE IF NOT EXISTS raw_ig_media_insights
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMM(ingested_at)
-ORDER BY (ig_user_id, ig_media_id, metric, period, end_time, breakdown_key, ingested_at);
+ORDER BY (
+    ig_user_id,
+    ig_media_id,
+    metric,
+    period,
+    ifNull(end_time, toDateTime64(0, 3, 'UTC')),
+    ifNull(breakdown_key, ''),
+    ingested_at
+);
 
 CREATE TABLE IF NOT EXISTS raw_ig_user_insights
 (
@@ -190,7 +198,14 @@ CREATE TABLE IF NOT EXISTS raw_ig_user_insights
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMM(ingested_at)
-ORDER BY (ig_user_id, metric, period, end_time, breakdown_key, ingested_at);
+ORDER BY (
+    ig_user_id,
+    metric,
+    period,
+    ifNull(end_time, toDateTime64(0, 3, 'UTC')),
+    ifNull(breakdown_key, ''),
+    ingested_at
+);
 
 CREATE TABLE IF NOT EXISTS raw_ig_comments
 (
@@ -483,8 +498,14 @@ CREATE TABLE IF NOT EXISTS curated_ig_media_insights_timeseries
     version_ts DateTime64(3, 'UTC')
 )
 ENGINE = ReplacingMergeTree(version_ts)
-PARTITION BY toYYYYMM(end_time)
-ORDER BY (ig_media_id, metric, period, end_time, breakdown_key);
+PARTITION BY toYYYYMM(ifNull(end_time, toDateTime64(0, 3, 'UTC')))
+ORDER BY (
+    ig_media_id,
+    metric,
+    period,
+    ifNull(end_time, toDateTime64(0, 3, 'UTC')),
+    ifNull(breakdown_key, '')
+);
 
 CREATE TABLE IF NOT EXISTS curated_ig_user_insights_timeseries
 (
@@ -498,5 +519,11 @@ CREATE TABLE IF NOT EXISTS curated_ig_user_insights_timeseries
     version_ts DateTime64(3, 'UTC')
 )
 ENGINE = ReplacingMergeTree(version_ts)
-PARTITION BY toYYYYMM(end_time)
-ORDER BY (ig_user_id, metric, period, end_time, breakdown_key);
+PARTITION BY toYYYYMM(ifNull(end_time, toDateTime64(0, 3, 'UTC')))
+ORDER BY (
+    ig_user_id,
+    metric,
+    period,
+    ifNull(end_time, toDateTime64(0, 3, 'UTC')),
+    ifNull(breakdown_key, '')
+);
