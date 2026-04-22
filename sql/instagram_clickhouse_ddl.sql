@@ -1,5 +1,5 @@
-CREATE DATABASE IF NOT EXISTS instagram_etl;
-USE instagram_etl;
+CREATE DATABASE IF NOT EXISTS instagram_raw;
+USE instagram_raw;
 
 -- -----------------------------------------------------------------------------
 -- Internal pipeline control/state tables
