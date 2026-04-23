@@ -36,6 +36,41 @@ ENGINE = MergeTree
 PARTITION BY toYYYYMM(started_at)
 ORDER BY (account_id, stream, started_at, run_id);
 
+CREATE TABLE IF NOT EXISTS etl_stream_windows
+(
+    account_id String,
+    stream LowCardinality(String),
+    window_start DateTime64(3, 'UTC'),
+    window_end DateTime64(3, 'UTC'),
+    window_id String,
+    attempt UInt32,
+    run_id String,
+    status LowCardinality(String), -- running | success | failed | skipped
+    rows_extracted UInt64 DEFAULT 0,
+    rows_loaded_raw UInt64 DEFAULT 0,
+    rows_loaded_curated UInt64 DEFAULT 0,
+    error_message Nullable(String),
+    updated_at DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+ENGINE = ReplacingMergeTree(updated_at)
+PARTITION BY toYYYYMM(window_start)
+ORDER BY (account_id, stream, window_start, window_end);
+
+CREATE TABLE IF NOT EXISTS etl_run_steps
+(
+    run_id String,
+    account_id String,
+    stream LowCardinality(String),
+    window_id Nullable(String),
+    step LowCardinality(String),
+    status LowCardinality(String),
+    message Nullable(String),
+    created_at DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMM(created_at)
+ORDER BY (account_id, run_id, created_at, step);
+
 -- -----------------------------------------------------------------------------
 -- Raw append-only tables (API payload normalized + payload_json)
 -- -----------------------------------------------------------------------------
@@ -436,7 +471,7 @@ CREATE TABLE IF NOT EXISTS curated_ig_media_current
     version_ts DateTime64(3, 'UTC')
 )
 ENGINE = ReplacingMergeTree(version_ts)
-ORDER BY ig_media_id;
+ORDER BY (ig_user_id, ig_media_id);
 
 CREATE TABLE IF NOT EXISTS curated_ig_comments_current
 (
@@ -453,7 +488,7 @@ CREATE TABLE IF NOT EXISTS curated_ig_comments_current
     version_ts DateTime64(3, 'UTC')
 )
 ENGINE = ReplacingMergeTree(version_ts)
-ORDER BY ig_comment_id;
+ORDER BY (ig_user_id, ig_comment_id);
 
 CREATE TABLE IF NOT EXISTS curated_ig_media_insights_timeseries
 (
@@ -470,6 +505,7 @@ CREATE TABLE IF NOT EXISTS curated_ig_media_insights_timeseries
 ENGINE = ReplacingMergeTree(version_ts)
 PARTITION BY toYYYYMM(ifNull(end_time, toDateTime64(0, 3, 'UTC')))
 ORDER BY (
+    ig_user_id,
     ig_media_id,
     metric,
     period,

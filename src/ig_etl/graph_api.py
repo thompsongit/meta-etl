@@ -181,15 +181,21 @@ def fetch_comments_for_media(
     media_id: str,
     page_size: int,
     since_unix: int | None,
+    until_unix: int | None = None,
 ) -> list[dict[str, Any]]:
     last_exc: GraphAPIError | None = None
     for fields in COMMENT_FIELDS_CANDIDATES:
-        for include_since in (True, False):
-            if include_since and since_unix is None:
-                continue
-            params: dict[str, Any] = {"fields": fields, "limit": page_size}
-            if include_since and since_unix is not None:
-                params["since"] = since_unix
+        candidate_params: list[dict[str, Any]] = []
+        base = {"fields": fields, "limit": page_size}
+        if since_unix is not None and until_unix is not None:
+            candidate_params.append({**base, "since": since_unix, "until": until_unix})
+        if since_unix is not None:
+            candidate_params.append({**base, "since": since_unix})
+        if until_unix is not None:
+            candidate_params.append({**base, "until": until_unix})
+        candidate_params.append(base)
+
+        for params in candidate_params:
             try:
                 return iter_graph_collection(
                     client,
@@ -203,10 +209,8 @@ def fetch_comments_for_media(
                 last_exc = exc
                 if is_permission_error(exc):
                     raise
-                if include_since and is_comment_validation_error(exc):
-                    continue
                 if is_comment_validation_error(exc):
-                    break
+                    continue
                 raise
     if last_exc is not None:
         raise last_exc

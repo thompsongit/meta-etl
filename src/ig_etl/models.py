@@ -26,3 +26,8 @@ class CommentRows:
     curated_rows: list[tuple[Any, ...]]
     max_timestamp: datetime | None
 
+
+@dataclass(frozen=True)
+class SyncWindow:
+    start: datetime
+    end: datetime

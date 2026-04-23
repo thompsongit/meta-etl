@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
@@ -29,6 +30,9 @@ class SyncConfig:
     comments_media_scan_limit: int
     comments_lookback_hours: int
     comments_backfill_days: int
+    initial_sync_start_at: datetime | None
+    backfill_chunk_days: int
+    max_windows_per_run: int
     lock_file: str
     http_timeout_seconds: int
     ch_host: str
@@ -57,6 +61,21 @@ def _unquote(value: str) -> str:
     if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in {"'", '"'}:
         return stripped[1:-1]
     return stripped
+
+
+def _parse_utc_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    normalized = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid datetime format for INITIAL_SYNC_START_AT/--initial-sync-start-at: {value}"
+        ) from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def load_env_file(path: str, override: bool = False) -> bool:
@@ -125,6 +144,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--backfill-days",
         type=int,
         default=int(os.getenv("BACKFILL_DAYS", "90")),
+    )
+    parser.add_argument(
+        "--initial-sync-start-at",
+        default=os.getenv("INITIAL_SYNC_START_AT"),
+        help="UTC ISO datetime for initial bootstrap start, e.g. 2024-01-01T00:00:00Z",
+    )
+    parser.add_argument(
+        "--backfill-chunk-days",
+        type=int,
+        default=int(os.getenv("BACKFILL_CHUNK_DAYS", "60")),
+    )
+    parser.add_argument(
+        "--max-windows-per-run",
+        type=int,
+        default=int(os.getenv("MAX_WINDOWS_PER_RUN", "0")),
+        help="Limit windows processed per run (0 = no limit)",
     )
     parser.add_argument(
         "--lookback-hours",
@@ -214,6 +249,9 @@ def parse_config(argv: Sequence[str] | None = None) -> SyncConfig:
         comments_media_scan_limit=args.comments_media_scan_limit,
         comments_lookback_hours=args.comments_lookback_hours,
         comments_backfill_days=args.comments_backfill_days,
+        initial_sync_start_at=_parse_utc_datetime(args.initial_sync_start_at),
+        backfill_chunk_days=max(1, args.backfill_chunk_days),
+        max_windows_per_run=max(0, args.max_windows_per_run),
         lock_file=args.lock_file,
         http_timeout_seconds=args.http_timeout_seconds,
         ch_host=_require("CH_HOST/--ch-host", args.ch_host),
