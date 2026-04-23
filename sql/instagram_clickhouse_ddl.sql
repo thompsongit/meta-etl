@@ -533,3 +533,197 @@ ORDER BY (
     ifNull(end_time, toDateTime64(0, 3, 'UTC')),
     ifNull(breakdown_key, '')
 );
+
+CREATE TABLE IF NOT EXISTS curated_ig_media_children_current
+(
+    ig_user_id String,
+    parent_media_id String,
+    child_media_id String,
+    media_type Nullable(String),
+    media_product_type Nullable(String),
+    permalink Nullable(String),
+    media_url Nullable(String),
+    thumbnail_url Nullable(String),
+    source_timestamp Nullable(DateTime64(3, 'UTC')),
+    version_ts DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(version_ts)
+ORDER BY (ig_user_id, parent_media_id, child_media_id);
+
+CREATE TABLE IF NOT EXISTS curated_ig_stories_current
+(
+    ig_user_id String,
+    ig_story_id String,
+    media_type Nullable(String),
+    media_product_type Nullable(String),
+    permalink Nullable(String),
+    media_url Nullable(String),
+    thumbnail_url Nullable(String),
+    source_timestamp Nullable(DateTime64(3, 'UTC')),
+    version_ts DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(version_ts)
+ORDER BY (ig_user_id, ig_story_id);
+
+CREATE TABLE IF NOT EXISTS curated_ig_comment_replies_current
+(
+    ig_user_id String,
+    ig_media_id String,
+    parent_comment_id String,
+    ig_reply_id String,
+    text Nullable(String),
+    username Nullable(String),
+    like_count Nullable(UInt64),
+    hidden Nullable(UInt8),
+    source_timestamp Nullable(DateTime64(3, 'UTC')),
+    source_updated_at Nullable(DateTime64(3, 'UTC')),
+    version_ts DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(version_ts)
+ORDER BY (ig_user_id, ig_media_id, parent_comment_id, ig_reply_id);
+
+CREATE TABLE IF NOT EXISTS curated_ig_user_tags_current
+(
+    ig_user_id String,
+    tagged_media_id String,
+    media_type Nullable(String),
+    permalink Nullable(String),
+    caption Nullable(String),
+    source_timestamp Nullable(DateTime64(3, 'UTC')),
+    version_ts DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(version_ts)
+ORDER BY (ig_user_id, tagged_media_id);
+
+CREATE TABLE IF NOT EXISTS curated_ig_mentioned_media_current
+(
+    ig_user_id String,
+    mentioned_media_id String,
+    media_type Nullable(String),
+    permalink Nullable(String),
+    caption Nullable(String),
+    source_timestamp Nullable(DateTime64(3, 'UTC')),
+    version_ts DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(version_ts)
+ORDER BY (ig_user_id, mentioned_media_id);
+
+CREATE TABLE IF NOT EXISTS curated_ig_hashtag_lookup_current
+(
+    ig_user_id String,
+    hashtag_name String,
+    ig_hashtag_id String,
+    source_fetched_at DateTime64(3, 'UTC'),
+    version_ts DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(version_ts)
+ORDER BY (ig_user_id, hashtag_name, ig_hashtag_id);
+
+CREATE TABLE IF NOT EXISTS curated_ig_hashtag_top_media_current
+(
+    ig_user_id String,
+    ig_hashtag_id String,
+    ig_media_id String,
+    media_type Nullable(String),
+    permalink Nullable(String),
+    caption Nullable(String),
+    source_timestamp Nullable(DateTime64(3, 'UTC')),
+    version_ts DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(version_ts)
+ORDER BY (ig_user_id, ig_hashtag_id, ig_media_id);
+
+CREATE TABLE IF NOT EXISTS curated_ig_hashtag_recent_media_current
+(
+    ig_user_id String,
+    ig_hashtag_id String,
+    ig_media_id String,
+    media_type Nullable(String),
+    permalink Nullable(String),
+    caption Nullable(String),
+    source_timestamp Nullable(DateTime64(3, 'UTC')),
+    version_ts DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(version_ts)
+ORDER BY (ig_user_id, ig_hashtag_id, ig_media_id);
+
+CREATE TABLE IF NOT EXISTS curated_ig_business_discovery_profile_current
+(
+    source_ig_user_id String,
+    discovered_ig_user_id String,
+    discovered_username Nullable(String),
+    discovered_name Nullable(String),
+    biography Nullable(String),
+    website Nullable(String),
+    followers_count Nullable(UInt64),
+    follows_count Nullable(UInt64),
+    media_count Nullable(UInt64),
+    source_fetched_at DateTime64(3, 'UTC'),
+    version_ts DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(version_ts)
+ORDER BY (source_ig_user_id, discovered_ig_user_id);
+
+CREATE TABLE IF NOT EXISTS curated_ig_business_discovery_media_current
+(
+    source_ig_user_id String,
+    discovered_ig_user_id String,
+    ig_media_id String,
+    media_type Nullable(String),
+    media_product_type Nullable(String),
+    permalink Nullable(String),
+    caption Nullable(String),
+    source_timestamp Nullable(DateTime64(3, 'UTC')),
+    version_ts DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(version_ts)
+ORDER BY (source_ig_user_id, discovered_ig_user_id, ig_media_id);
+
+CREATE TABLE IF NOT EXISTS curated_ig_conversations_current
+(
+    ig_user_id String,
+    conversation_id String,
+    updated_time Nullable(DateTime64(3, 'UTC')),
+    participants_json String DEFAULT '[]',
+    version_ts DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(version_ts)
+ORDER BY (ig_user_id, conversation_id);
+
+CREATE TABLE IF NOT EXISTS curated_ig_messages_current
+(
+    ig_user_id String,
+    conversation_id String,
+    message_id String,
+    from_id Nullable(String),
+    to_ids_json String DEFAULT '[]',
+    text Nullable(String),
+    created_time Nullable(DateTime64(3, 'UTC')),
+    is_echo Nullable(UInt8),
+    version_ts DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(version_ts)
+ORDER BY (ig_user_id, conversation_id, message_id);
+
+CREATE TABLE IF NOT EXISTS curated_ig_message_detail_current
+(
+    ig_user_id String,
+    message_id String,
+    conversation_id Nullable(String),
+    created_time Nullable(DateTime64(3, 'UTC')),
+    version_ts DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(version_ts)
+ORDER BY (ig_user_id, message_id);
+
+CREATE TABLE IF NOT EXISTS curated_ig_webhook_events_current
+(
+    event_id String,
+    ig_user_id Nullable(String),
+    object LowCardinality(String),
+    event_field LowCardinality(String),
+    source_event_time Nullable(DateTime64(3, 'UTC')),
+    version_ts DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(version_ts)
+ORDER BY (object, event_field, event_id);

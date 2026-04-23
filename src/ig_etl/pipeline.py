@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .clickhouse_store import (
@@ -15,9 +15,18 @@ from .clickhouse_store import (
 )
 from .config import SyncConfig
 from .constants import (
+    BUSINESS_DISCOVERY_PROFILE_FIELDS_CANDIDATES,
+    CHILD_MEDIA_FIELDS_CANDIDATES,
+    COMMENT_REPLY_FIELDS_CANDIDATES,
+    CONVERSATION_FIELDS_CANDIDATES,
+    HASHTAG_MEDIA_FIELDS_CANDIDATES,
+    MENTIONED_MEDIA_FIELDS_CANDIDATES,
     MEDIA_FIELDS_CANDIDATES,
     MEDIA_INSIGHT_CANDIDATES,
+    MESSAGE_FIELDS_CANDIDATES,
+    STORY_FIELDS_CANDIDATES,
     STREAM_NAME,
+    TAG_FIELDS_CANDIDATES,
     USER_INSIGHT_CANDIDATES,
 )
 from .graph_api import (
@@ -31,9 +40,20 @@ from .graph_api import (
 from .lock import acquire_nonblocking_lock
 from .models import SyncCounters, SyncWindow
 from .transform import (
+    build_business_discovery_rows,
     build_comment_rows_for_media,
+    build_comment_reply_rows,
+    build_conversation_rows,
+    build_hashtag_lookup_rows,
+    build_hashtag_media_rows,
     build_media_rows,
+    build_media_children_rows,
+    build_mentioned_media_rows,
+    build_message_detail_rows,
+    build_message_rows,
     build_profile_rows,
+    build_story_rows,
+    build_tag_rows,
     flatten_insight_rows,
 )
 from .utils import parse_graph_timestamp, utc_now
@@ -215,6 +235,108 @@ def _fetch_media_items_for_window(
         media_items = filtered_items
 
     return media_items
+
+
+def _is_skippable_stream_error(exc: GraphAPIError) -> bool:
+    if is_permission_error(exc):
+        return True
+    if exc.code == 100:
+        return True
+    message = exc.message.lower()
+    return any(
+        token in message
+        for token in (
+            "permission",
+            "permissions",
+            "unsupported",
+            "nonexisting field",
+            "unknown path",
+            "cannot query",
+            "does not exist",
+        )
+    )
+
+
+def _fetch_collection_with_candidates(
+    http_client: Any,
+    config: SyncConfig,
+    path: str,
+    field_candidates: list[str],
+    limit: int,
+    since_unix: int | None = None,
+    until_unix: int | None = None,
+    extra_params: dict[str, Any] | None = None,
+    timestamp_key: str = "timestamp",
+) -> list[dict[str, Any]]:
+    params_extra = dict(extra_params or {})
+    last_exc: GraphAPIError | None = None
+    since_dt = (
+        datetime.fromtimestamp(since_unix, tz=timezone.utc)
+        if since_unix is not None
+        else None
+    )
+    until_dt = (
+        datetime.fromtimestamp(until_unix, tz=timezone.utc)
+        if until_unix is not None
+        else None
+    )
+
+    for fields in field_candidates:
+        param_variants: list[dict[str, Any]] = []
+        base = {"fields": fields, "limit": limit, **params_extra}
+        if since_unix is not None and until_unix is not None:
+            param_variants.append({**base, "since": since_unix, "until": until_unix})
+        if since_unix is not None:
+            param_variants.append({**base, "since": since_unix})
+        if until_unix is not None:
+            param_variants.append({**base, "until": until_unix})
+        param_variants.append(base)
+
+        for params in param_variants:
+            try:
+                rows = iter_graph_collection(
+                    http_client,
+                    config.graph_base,
+                    config.graph_version,
+                    config.graph_token,
+                    path,
+                    params,
+                )
+                if since_dt is not None or until_dt is not None:
+                    filtered_rows: list[dict[str, Any]] = []
+                    for row in rows:
+                        if not isinstance(row, dict):
+                            continue
+                        row_ts = parse_graph_timestamp(row.get(timestamp_key))
+                        if row_ts is None:
+                            filtered_rows.append(row)
+                            continue
+                        if since_dt is not None and row_ts < since_dt:
+                            continue
+                        if until_dt is not None and row_ts > until_dt:
+                            continue
+                        filtered_rows.append(row)
+                    rows = filtered_rows
+                return [row for row in rows if isinstance(row, dict)]
+            except GraphAPIError as exc:
+                last_exc = exc
+                if is_permission_error(exc):
+                    raise
+                message = exc.message.lower()
+                if exc.code == 100 and (
+                    "field" in message
+                    or "nonexisting field" in message
+                    or "since" in message
+                    or "until" in message
+                    or "parameter" in message
+                    or "unsupported" in message
+                ):
+                    continue
+                raise
+
+    if last_exc is not None:
+        raise last_exc
+    return []
 
 
 def _sync_window(
@@ -480,6 +602,8 @@ def _sync_window(
     comments_media_probed = 0
     comment_raw_rows: list[tuple[Any, ...]] = []
     comment_curated_rows: list[tuple[Any, ...]] = []
+    media_ids_to_scan: list[str] = []
+    seen_comment_ids: set[str] = set()
 
     if config.disable_comments:
         print("[INFO] comments sync disabled by flag")
@@ -495,7 +619,6 @@ def _sync_window(
             media_ids_to_scan = media_ids_to_scan[: config.comments_media_scan_limit]
         print(f"[INFO] comment media targets={len(media_ids_to_scan)}")
 
-        seen_comment_ids: set[str] = set()
         for media_id in media_ids_to_scan:
             try:
                 comment_items = fetch_comments_for_media(
@@ -575,6 +698,861 @@ def _sync_window(
         ],
         comment_curated_rows,
     )
+
+    if config.enable_extended_streams:
+        window_since_unix = int(window.start.timestamp())
+        window_until_unix = int(window.end.timestamp())
+
+        child_raw_rows: list[tuple[Any, ...]] = []
+        child_curated_rows: list[tuple[Any, ...]] = []
+        child_probe_count = 0
+        child_parent_ids = list(dict.fromkeys(media_rows.media_ids + media_ids_for_insights))
+        for media_id in child_parent_ids:
+            try:
+                child_items = _fetch_collection_with_candidates(
+                    http_client=http_client,
+                    config=config,
+                    path=f"/{media_id}/children",
+                    field_candidates=CHILD_MEDIA_FIELDS_CANDIDATES,
+                    limit=config.media_page_size,
+                    timestamp_key="timestamp",
+                )
+            except GraphAPIError as exc:
+                if _is_skippable_stream_error(exc):
+                    print(f"[WARN] skipping media children for media_id={media_id}: {exc}")
+                    continue
+                raise
+
+            child_probe_count += 1
+            counters.rows_extracted += len(child_items)
+            raw_rows, curated_rows = build_media_children_rows(
+                config.ig_user_id,
+                media_id,
+                child_items,
+                run_id,
+                ingested_at,
+            )
+            child_raw_rows.extend(raw_rows)
+            child_curated_rows.extend(curated_rows)
+        print(f"[INFO] media children probes={child_probe_count}")
+
+        counters.rows_loaded_raw += insert_rows(
+            ch_client,
+            "raw_ig_media_children",
+            [
+                "ig_user_id",
+                "parent_media_id",
+                "child_media_id",
+                "media_type",
+                "media_product_type",
+                "permalink",
+                "media_url",
+                "thumbnail_url",
+                "source_timestamp",
+                "payload_json",
+                "run_id",
+                "ingested_at",
+            ],
+            child_raw_rows,
+        )
+        counters.rows_loaded_curated += insert_rows(
+            ch_client,
+            "curated_ig_media_children_current",
+            [
+                "ig_user_id",
+                "parent_media_id",
+                "child_media_id",
+                "media_type",
+                "media_product_type",
+                "permalink",
+                "media_url",
+                "thumbnail_url",
+                "source_timestamp",
+                "version_ts",
+            ],
+            child_curated_rows,
+        )
+
+        try:
+            story_items = _fetch_collection_with_candidates(
+                http_client=http_client,
+                config=config,
+                path=f"/{config.ig_user_id}/stories",
+                field_candidates=STORY_FIELDS_CANDIDATES,
+                limit=config.media_page_size,
+                since_unix=window_since_unix,
+                until_unix=window_until_unix,
+                timestamp_key="timestamp",
+            )
+        except GraphAPIError as exc:
+            if _is_skippable_stream_error(exc):
+                print(f"[WARN] skipping stories stream: {exc}")
+                story_items = []
+            else:
+                raise
+        counters.rows_extracted += len(story_items)
+        story_raw_rows, story_curated_rows = build_story_rows(
+            config.ig_user_id,
+            story_items,
+            run_id,
+            ingested_at,
+        )
+        counters.rows_loaded_raw += insert_rows(
+            ch_client,
+            "raw_ig_stories",
+            [
+                "ig_user_id",
+                "ig_story_id",
+                "media_type",
+                "media_product_type",
+                "permalink",
+                "media_url",
+                "thumbnail_url",
+                "source_timestamp",
+                "payload_json",
+                "run_id",
+                "ingested_at",
+            ],
+            story_raw_rows,
+        )
+        counters.rows_loaded_curated += insert_rows(
+            ch_client,
+            "curated_ig_stories_current",
+            [
+                "ig_user_id",
+                "ig_story_id",
+                "media_type",
+                "media_product_type",
+                "permalink",
+                "media_url",
+                "thumbnail_url",
+                "source_timestamp",
+                "version_ts",
+            ],
+            story_curated_rows,
+        )
+        print(f"[INFO] stories fetched={len(story_items)}")
+
+        try:
+            tag_items = _fetch_collection_with_candidates(
+                http_client=http_client,
+                config=config,
+                path=f"/{config.ig_user_id}/tags",
+                field_candidates=TAG_FIELDS_CANDIDATES,
+                limit=config.media_page_size,
+                since_unix=window_since_unix,
+                until_unix=window_until_unix,
+                timestamp_key="timestamp",
+            )
+        except GraphAPIError as exc:
+            if _is_skippable_stream_error(exc):
+                print(f"[WARN] skipping tags stream: {exc}")
+                tag_items = []
+            else:
+                raise
+        counters.rows_extracted += len(tag_items)
+        tag_raw_rows, tag_curated_rows = build_tag_rows(
+            config.ig_user_id,
+            tag_items,
+            run_id,
+            ingested_at,
+        )
+        counters.rows_loaded_raw += insert_rows(
+            ch_client,
+            "raw_ig_user_tags",
+            [
+                "ig_user_id",
+                "tagged_media_id",
+                "media_type",
+                "permalink",
+                "caption",
+                "source_timestamp",
+                "payload_json",
+                "run_id",
+                "ingested_at",
+            ],
+            tag_raw_rows,
+        )
+        counters.rows_loaded_curated += insert_rows(
+            ch_client,
+            "curated_ig_user_tags_current",
+            [
+                "ig_user_id",
+                "tagged_media_id",
+                "media_type",
+                "permalink",
+                "caption",
+                "source_timestamp",
+                "version_ts",
+            ],
+            tag_curated_rows,
+        )
+        print(f"[INFO] tags fetched={len(tag_items)}")
+
+        try:
+            mentioned_items = _fetch_collection_with_candidates(
+                http_client=http_client,
+                config=config,
+                path=f"/{config.ig_user_id}/mentioned_media",
+                field_candidates=MENTIONED_MEDIA_FIELDS_CANDIDATES,
+                limit=config.media_page_size,
+                since_unix=window_since_unix,
+                until_unix=window_until_unix,
+                timestamp_key="timestamp",
+            )
+        except GraphAPIError as exc:
+            if _is_skippable_stream_error(exc):
+                print(f"[WARN] skipping mentioned_media stream: {exc}")
+                mentioned_items = []
+            else:
+                raise
+        counters.rows_extracted += len(mentioned_items)
+        mentioned_raw_rows, mentioned_curated_rows = build_mentioned_media_rows(
+            config.ig_user_id,
+            mentioned_items,
+            run_id,
+            ingested_at,
+        )
+        counters.rows_loaded_raw += insert_rows(
+            ch_client,
+            "raw_ig_mentioned_media",
+            [
+                "ig_user_id",
+                "mentioned_media_id",
+                "media_type",
+                "permalink",
+                "caption",
+                "source_timestamp",
+                "payload_json",
+                "run_id",
+                "ingested_at",
+            ],
+            mentioned_raw_rows,
+        )
+        counters.rows_loaded_curated += insert_rows(
+            ch_client,
+            "curated_ig_mentioned_media_current",
+            [
+                "ig_user_id",
+                "mentioned_media_id",
+                "media_type",
+                "permalink",
+                "caption",
+                "source_timestamp",
+                "version_ts",
+            ],
+            mentioned_curated_rows,
+        )
+        print(f"[INFO] mentioned_media fetched={len(mentioned_items)}")
+
+        reply_raw_rows: list[tuple[Any, ...]] = []
+        reply_curated_rows: list[tuple[Any, ...]] = []
+        if config.disable_comments:
+            print("[INFO] comment replies skipped (comments disabled)")
+        elif comments_permission_skipped:
+            print("[INFO] comment replies skipped (comments permission unavailable)")
+        elif not seen_comment_ids:
+            print("[INFO] comment replies skipped (no comment ids in window)")
+        else:
+            seen_reply_ids: set[str] = set()
+            reply_probe_count = 0
+            comment_media_pairs = [
+                (row[2], row[1]) for row in comment_raw_rows if len(row) > 3 and row[2] and row[1]
+            ]
+            for comment_id, media_id in comment_media_pairs:
+                try:
+                    reply_items = _fetch_collection_with_candidates(
+                        http_client=http_client,
+                        config=config,
+                        path=f"/{comment_id}/replies",
+                        field_candidates=COMMENT_REPLY_FIELDS_CANDIDATES,
+                        limit=config.comments_page_size,
+                        since_unix=comments_since_unix,
+                        until_unix=comments_until_unix,
+                        timestamp_key="timestamp",
+                    )
+                except GraphAPIError as exc:
+                    if _is_skippable_stream_error(exc):
+                        print(f"[WARN] skipping comment replies for comment_id={comment_id}: {exc}")
+                        continue
+                    raise
+
+                filtered_replies: list[dict[str, Any]] = []
+                for reply in reply_items:
+                    reply_id = reply.get("id")
+                    if not reply_id or reply_id in seen_reply_ids:
+                        continue
+                    seen_reply_ids.add(reply_id)
+                    filtered_replies.append(reply)
+
+                reply_probe_count += 1
+                counters.rows_extracted += len(filtered_replies)
+                raw_rows, curated_rows = build_comment_reply_rows(
+                    config.ig_user_id,
+                    media_id,
+                    comment_id,
+                    filtered_replies,
+                    run_id,
+                    ingested_at,
+                )
+                reply_raw_rows.extend(raw_rows)
+                reply_curated_rows.extend(curated_rows)
+            print(f"[INFO] comment reply probes={reply_probe_count}")
+
+        counters.rows_loaded_raw += insert_rows(
+            ch_client,
+            "raw_ig_comment_replies",
+            [
+                "ig_user_id",
+                "ig_media_id",
+                "parent_comment_id",
+                "ig_reply_id",
+                "text",
+                "username",
+                "like_count",
+                "hidden",
+                "source_timestamp",
+                "source_updated_at",
+                "payload_json",
+                "run_id",
+                "ingested_at",
+            ],
+            reply_raw_rows,
+        )
+        counters.rows_loaded_curated += insert_rows(
+            ch_client,
+            "curated_ig_comment_replies_current",
+            [
+                "ig_user_id",
+                "ig_media_id",
+                "parent_comment_id",
+                "ig_reply_id",
+                "text",
+                "username",
+                "like_count",
+                "hidden",
+                "source_timestamp",
+                "source_updated_at",
+                "version_ts",
+            ],
+            reply_curated_rows,
+        )
+
+        hashtag_lookup_raw_rows: list[tuple[Any, ...]] = []
+        hashtag_lookup_curated_rows: list[tuple[Any, ...]] = []
+        top_hashtag_raw_rows: list[tuple[Any, ...]] = []
+        top_hashtag_curated_rows: list[tuple[Any, ...]] = []
+        recent_hashtag_raw_rows: list[tuple[Any, ...]] = []
+        recent_hashtag_curated_rows: list[tuple[Any, ...]] = []
+        hashtag_ids: list[str] = []
+        for hashtag_name in config.hashtag_names:
+            try:
+                hashtag_lookup_payload = graph_get_json(
+                    http_client,
+                    config.graph_base,
+                    config.graph_version,
+                    config.graph_token,
+                    "/ig_hashtag_search",
+                    params={
+                        "user_id": config.ig_user_id,
+                        "q": hashtag_name,
+                    },
+                )
+            except GraphAPIError as exc:
+                if _is_skippable_stream_error(exc):
+                    print(f"[WARN] skipping hashtag lookup name={hashtag_name}: {exc}")
+                    continue
+                raise
+
+            hashtag_items = hashtag_lookup_payload.get("data", [])
+            if not isinstance(hashtag_items, list):
+                hashtag_items = []
+            counters.rows_extracted += len(hashtag_items)
+            raw_rows, curated_rows, discovered_ids = build_hashtag_lookup_rows(
+                config.ig_user_id,
+                hashtag_name,
+                hashtag_items,
+                run_id,
+                ingested_at,
+            )
+            hashtag_lookup_raw_rows.extend(raw_rows)
+            hashtag_lookup_curated_rows.extend(curated_rows)
+            hashtag_ids.extend(discovered_ids)
+
+        counters.rows_loaded_raw += insert_rows(
+            ch_client,
+            "raw_ig_hashtag_lookup",
+            [
+                "ig_user_id",
+                "hashtag_name",
+                "ig_hashtag_id",
+                "source_fetched_at",
+                "payload_json",
+                "run_id",
+                "ingested_at",
+            ],
+            hashtag_lookup_raw_rows,
+        )
+        counters.rows_loaded_curated += insert_rows(
+            ch_client,
+            "curated_ig_hashtag_lookup_current",
+            [
+                "ig_user_id",
+                "hashtag_name",
+                "ig_hashtag_id",
+                "source_fetched_at",
+                "version_ts",
+            ],
+            hashtag_lookup_curated_rows,
+        )
+
+        hashtag_probe_count = 0
+        for hashtag_id in dict.fromkeys(hashtag_ids):
+            try:
+                top_media_items = _fetch_collection_with_candidates(
+                    http_client=http_client,
+                    config=config,
+                    path=f"/{hashtag_id}/top_media",
+                    field_candidates=HASHTAG_MEDIA_FIELDS_CANDIDATES,
+                    limit=config.media_page_size,
+                    extra_params={"user_id": config.ig_user_id},
+                    timestamp_key="timestamp",
+                )
+            except GraphAPIError as exc:
+                if _is_skippable_stream_error(exc):
+                    print(f"[WARN] skipping hashtag top_media hashtag_id={hashtag_id}: {exc}")
+                    top_media_items = []
+                else:
+                    raise
+            counters.rows_extracted += len(top_media_items)
+            raw_rows, curated_rows = build_hashtag_media_rows(
+                config.ig_user_id,
+                hashtag_id,
+                top_media_items,
+                run_id,
+                ingested_at,
+            )
+            top_hashtag_raw_rows.extend(raw_rows)
+            top_hashtag_curated_rows.extend(curated_rows)
+
+            try:
+                recent_media_items = _fetch_collection_with_candidates(
+                    http_client=http_client,
+                    config=config,
+                    path=f"/{hashtag_id}/recent_media",
+                    field_candidates=HASHTAG_MEDIA_FIELDS_CANDIDATES,
+                    limit=config.media_page_size,
+                    since_unix=window_since_unix,
+                    until_unix=window_until_unix,
+                    extra_params={"user_id": config.ig_user_id},
+                    timestamp_key="timestamp",
+                )
+            except GraphAPIError as exc:
+                if _is_skippable_stream_error(exc):
+                    print(f"[WARN] skipping hashtag recent_media hashtag_id={hashtag_id}: {exc}")
+                    recent_media_items = []
+                else:
+                    raise
+            counters.rows_extracted += len(recent_media_items)
+            raw_rows, curated_rows = build_hashtag_media_rows(
+                config.ig_user_id,
+                hashtag_id,
+                recent_media_items,
+                run_id,
+                ingested_at,
+            )
+            recent_hashtag_raw_rows.extend(raw_rows)
+            recent_hashtag_curated_rows.extend(curated_rows)
+            hashtag_probe_count += 1
+        print(f"[INFO] hashtag media probes={hashtag_probe_count}")
+
+        counters.rows_loaded_raw += insert_rows(
+            ch_client,
+            "raw_ig_hashtag_top_media",
+            [
+                "ig_user_id",
+                "ig_hashtag_id",
+                "ig_media_id",
+                "media_type",
+                "permalink",
+                "caption",
+                "source_timestamp",
+                "payload_json",
+                "run_id",
+                "ingested_at",
+            ],
+            top_hashtag_raw_rows,
+        )
+        counters.rows_loaded_curated += insert_rows(
+            ch_client,
+            "curated_ig_hashtag_top_media_current",
+            [
+                "ig_user_id",
+                "ig_hashtag_id",
+                "ig_media_id",
+                "media_type",
+                "permalink",
+                "caption",
+                "source_timestamp",
+                "version_ts",
+            ],
+            top_hashtag_curated_rows,
+        )
+        counters.rows_loaded_raw += insert_rows(
+            ch_client,
+            "raw_ig_hashtag_recent_media",
+            [
+                "ig_user_id",
+                "ig_hashtag_id",
+                "ig_media_id",
+                "media_type",
+                "permalink",
+                "caption",
+                "source_timestamp",
+                "payload_json",
+                "run_id",
+                "ingested_at",
+            ],
+            recent_hashtag_raw_rows,
+        )
+        counters.rows_loaded_curated += insert_rows(
+            ch_client,
+            "curated_ig_hashtag_recent_media_current",
+            [
+                "ig_user_id",
+                "ig_hashtag_id",
+                "ig_media_id",
+                "media_type",
+                "permalink",
+                "caption",
+                "source_timestamp",
+                "version_ts",
+            ],
+            recent_hashtag_curated_rows,
+        )
+
+        bd_profile_raw_rows: list[tuple[Any, ...]] = []
+        bd_profile_curated_rows: list[tuple[Any, ...]] = []
+        bd_media_raw_rows: list[tuple[Any, ...]] = []
+        bd_media_curated_rows: list[tuple[Any, ...]] = []
+        bd_probe_count = 0
+        for username in config.business_discovery_usernames:
+            discovered_payload: dict[str, Any] | None = None
+            last_exc: GraphAPIError | None = None
+            for fields in BUSINESS_DISCOVERY_PROFILE_FIELDS_CANDIDATES:
+                query_field = f"business_discovery.username({username}){{{fields}}}"
+                try:
+                    response_payload = graph_get_json(
+                        http_client,
+                        config.graph_base,
+                        config.graph_version,
+                        config.graph_token,
+                        f"/{config.ig_user_id}",
+                        params={"fields": query_field},
+                    )
+                except GraphAPIError as exc:
+                    last_exc = exc
+                    if is_permission_error(exc):
+                        break
+                    if exc.code == 100:
+                        continue
+                    raise
+
+                candidate_payload = response_payload.get("business_discovery")
+                if isinstance(candidate_payload, dict):
+                    discovered_payload = candidate_payload
+                    break
+                discovered_payload = {}
+                break
+
+            if discovered_payload is None:
+                if last_exc is not None and _is_skippable_stream_error(last_exc):
+                    print(f"[WARN] skipping business discovery username={username}: {last_exc}")
+                    continue
+                if last_exc is not None:
+                    raise last_exc
+                continue
+
+            if not discovered_payload.get("id"):
+                print(f"[INFO] business discovery returned no account for username={username}")
+                continue
+
+            media_items = discovered_payload.get("media", {}).get("data", [])
+            media_count = len(media_items) if isinstance(media_items, list) else 0
+            counters.rows_extracted += 1 + media_count
+            profile_raw_rows, profile_curated_rows, media_raw_rows, media_curated_rows = (
+                build_business_discovery_rows(
+                    config.ig_user_id,
+                    discovered_payload,
+                    run_id,
+                    ingested_at,
+                )
+            )
+            bd_profile_raw_rows.extend(profile_raw_rows)
+            bd_profile_curated_rows.extend(profile_curated_rows)
+            bd_media_raw_rows.extend(media_raw_rows)
+            bd_media_curated_rows.extend(media_curated_rows)
+            bd_probe_count += 1
+        print(f"[INFO] business discovery probes={bd_probe_count}")
+
+        counters.rows_loaded_raw += insert_rows(
+            ch_client,
+            "raw_ig_business_discovery_profile",
+            [
+                "source_ig_user_id",
+                "discovered_ig_user_id",
+                "discovered_username",
+                "discovered_name",
+                "biography",
+                "website",
+                "followers_count",
+                "follows_count",
+                "media_count",
+                "source_fetched_at",
+                "payload_json",
+                "run_id",
+                "ingested_at",
+            ],
+            bd_profile_raw_rows,
+        )
+        counters.rows_loaded_curated += insert_rows(
+            ch_client,
+            "curated_ig_business_discovery_profile_current",
+            [
+                "source_ig_user_id",
+                "discovered_ig_user_id",
+                "discovered_username",
+                "discovered_name",
+                "biography",
+                "website",
+                "followers_count",
+                "follows_count",
+                "media_count",
+                "source_fetched_at",
+                "version_ts",
+            ],
+            bd_profile_curated_rows,
+        )
+        counters.rows_loaded_raw += insert_rows(
+            ch_client,
+            "raw_ig_business_discovery_media",
+            [
+                "source_ig_user_id",
+                "discovered_ig_user_id",
+                "ig_media_id",
+                "media_type",
+                "media_product_type",
+                "permalink",
+                "caption",
+                "source_timestamp",
+                "payload_json",
+                "run_id",
+                "ingested_at",
+            ],
+            bd_media_raw_rows,
+        )
+        counters.rows_loaded_curated += insert_rows(
+            ch_client,
+            "curated_ig_business_discovery_media_current",
+            [
+                "source_ig_user_id",
+                "discovered_ig_user_id",
+                "ig_media_id",
+                "media_type",
+                "media_product_type",
+                "permalink",
+                "caption",
+                "source_timestamp",
+                "version_ts",
+            ],
+            bd_media_curated_rows,
+        )
+
+        conversation_items: list[dict[str, Any]] = []
+        try:
+            conversation_items = _fetch_collection_with_candidates(
+                http_client=http_client,
+                config=config,
+                path=f"/{config.ig_user_id}/conversations",
+                field_candidates=CONVERSATION_FIELDS_CANDIDATES,
+                limit=config.messages_page_size,
+                since_unix=window_since_unix,
+                until_unix=window_until_unix,
+                timestamp_key="updated_time",
+            )
+        except GraphAPIError as exc:
+            if _is_skippable_stream_error(exc):
+                print(f"[WARN] skipping conversations stream: {exc}")
+                conversation_items = []
+            else:
+                raise
+
+        counters.rows_extracted += len(conversation_items)
+        conversation_raw_rows, conversation_curated_rows = build_conversation_rows(
+            config.ig_user_id,
+            conversation_items,
+            run_id,
+            ingested_at,
+        )
+        counters.rows_loaded_raw += insert_rows(
+            ch_client,
+            "raw_ig_conversations",
+            [
+                "ig_user_id",
+                "conversation_id",
+                "updated_time",
+                "participants_json",
+                "payload_json",
+                "run_id",
+                "ingested_at",
+            ],
+            conversation_raw_rows,
+        )
+        counters.rows_loaded_curated += insert_rows(
+            ch_client,
+            "curated_ig_conversations_current",
+            [
+                "ig_user_id",
+                "conversation_id",
+                "updated_time",
+                "participants_json",
+                "version_ts",
+            ],
+            conversation_curated_rows,
+        )
+
+        message_raw_rows: list[tuple[Any, ...]] = []
+        message_curated_rows: list[tuple[Any, ...]] = []
+        message_detail_raw_rows: list[tuple[Any, ...]] = []
+        message_detail_curated_rows: list[tuple[Any, ...]] = []
+        message_probe_count = 0
+        message_detail_probe_count = 0
+        for conversation in conversation_items:
+            conversation_id = conversation.get("id")
+            if not conversation_id:
+                continue
+            try:
+                message_items = _fetch_collection_with_candidates(
+                    http_client=http_client,
+                    config=config,
+                    path=f"/{conversation_id}/messages",
+                    field_candidates=MESSAGE_FIELDS_CANDIDATES,
+                    limit=config.messages_page_size,
+                    since_unix=window_since_unix,
+                    until_unix=window_until_unix,
+                    timestamp_key="created_time",
+                )
+            except GraphAPIError as exc:
+                if _is_skippable_stream_error(exc):
+                    print(f"[WARN] skipping messages for conversation_id={conversation_id}: {exc}")
+                    continue
+                raise
+
+            counters.rows_extracted += len(message_items)
+            raw_rows, curated_rows, message_ids = build_message_rows(
+                config.ig_user_id,
+                conversation_id,
+                message_items,
+                run_id,
+                ingested_at,
+            )
+            message_raw_rows.extend(raw_rows)
+            message_curated_rows.extend(curated_rows)
+            message_probe_count += 1
+
+            for message_id in message_ids:
+                try:
+                    message_payload = graph_get_json(
+                        http_client,
+                        config.graph_base,
+                        config.graph_version,
+                        config.graph_token,
+                        f"/{message_id}",
+                        params={"fields": "id,created_time,conversation"},
+                    )
+                except GraphAPIError as exc:
+                    if _is_skippable_stream_error(exc):
+                        continue
+                    raise
+                counters.rows_extracted += 1
+                raw_detail_rows, curated_detail_rows = build_message_detail_rows(
+                    config.ig_user_id,
+                    message_payload,
+                    run_id,
+                    ingested_at,
+                )
+                message_detail_raw_rows.extend(raw_detail_rows)
+                message_detail_curated_rows.extend(curated_detail_rows)
+                message_detail_probe_count += 1
+
+        print(
+            f"[INFO] conversation probes={len(conversation_items)} "
+            f"message probes={message_probe_count} message detail probes={message_detail_probe_count}"
+        )
+
+        counters.rows_loaded_raw += insert_rows(
+            ch_client,
+            "raw_ig_messages",
+            [
+                "ig_user_id",
+                "conversation_id",
+                "message_id",
+                "from_id",
+                "to_ids_json",
+                "text",
+                "created_time",
+                "is_echo",
+                "payload_json",
+                "run_id",
+                "ingested_at",
+            ],
+            message_raw_rows,
+        )
+        counters.rows_loaded_curated += insert_rows(
+            ch_client,
+            "curated_ig_messages_current",
+            [
+                "ig_user_id",
+                "conversation_id",
+                "message_id",
+                "from_id",
+                "to_ids_json",
+                "text",
+                "created_time",
+                "is_echo",
+                "version_ts",
+            ],
+            message_curated_rows,
+        )
+        counters.rows_loaded_raw += insert_rows(
+            ch_client,
+            "raw_ig_message_detail",
+            [
+                "ig_user_id",
+                "message_id",
+                "conversation_id",
+                "created_time",
+                "payload_json",
+                "run_id",
+                "ingested_at",
+            ],
+            message_detail_raw_rows,
+        )
+        counters.rows_loaded_curated += insert_rows(
+            ch_client,
+            "curated_ig_message_detail_current",
+            [
+                "ig_user_id",
+                "message_id",
+                "conversation_id",
+                "created_time",
+                "version_ts",
+            ],
+            message_detail_curated_rows,
+        )
+        print("[INFO] webhook events stream not polled (webhook push-only)")
+    else:
+        print("[INFO] extended streams disabled by config")
 
     state_rows = [
         (

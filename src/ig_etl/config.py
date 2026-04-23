@@ -30,6 +30,10 @@ class SyncConfig:
     comments_media_scan_limit: int
     comments_lookback_hours: int
     comments_backfill_days: int
+    enable_extended_streams: bool
+    hashtag_names: tuple[str, ...]
+    business_discovery_usernames: tuple[str, ...]
+    messages_page_size: int
     initial_sync_start_at: datetime | None
     backfill_chunk_days: int
     max_windows_per_run: int
@@ -76,6 +80,13 @@ def _parse_utc_datetime(value: str | None) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _parse_csv_list(value: str | None) -> tuple[str, ...]:
+    if not value:
+        return ()
+    items = [part.strip() for part in value.split(",")]
+    return tuple(part for part in items if part)
 
 
 def load_env_file(path: str, override: bool = False) -> bool:
@@ -178,6 +189,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--disable-comments", action="store_true")
     parser.add_argument(
+        "--disable-extended-streams",
+        action="store_true",
+        help="Disable optional extractor streams beyond profile/media/insights/comments",
+    )
+    parser.add_argument(
+        "--hashtag-names",
+        default=os.getenv("HASHTAG_NAMES", ""),
+        help="Comma-separated hashtags for ig_hashtag_search/top_media/recent_media",
+    )
+    parser.add_argument(
+        "--business-discovery-usernames",
+        default=os.getenv("BUSINESS_DISCOVERY_USERNAMES", ""),
+        help="Comma-separated usernames for business_discovery expansion",
+    )
+    parser.add_argument(
+        "--messages-page-size",
+        type=int,
+        default=int(os.getenv("MESSAGES_PAGE_SIZE", "100")),
+    )
+    parser.add_argument(
         "--comments-page-size",
         type=int,
         default=int(os.getenv("COMMENTS_PAGE_SIZE", "50")),
@@ -249,6 +280,10 @@ def parse_config(argv: Sequence[str] | None = None) -> SyncConfig:
         comments_media_scan_limit=args.comments_media_scan_limit,
         comments_lookback_hours=args.comments_lookback_hours,
         comments_backfill_days=args.comments_backfill_days,
+        enable_extended_streams=not args.disable_extended_streams,
+        hashtag_names=_parse_csv_list(args.hashtag_names),
+        business_discovery_usernames=_parse_csv_list(args.business_discovery_usernames),
+        messages_page_size=max(1, args.messages_page_size),
         initial_sync_start_at=_parse_utc_datetime(args.initial_sync_start_at),
         backfill_chunk_days=max(1, args.backfill_chunk_days),
         max_windows_per_run=max(0, args.max_windows_per_run),
