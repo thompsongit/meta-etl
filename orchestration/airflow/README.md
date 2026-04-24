@@ -24,6 +24,15 @@ docker build -t ig-etl:dev-local /Users/mdot/Documents/dev/ig-etl
 cd /Users/mdot/Documents/dev/ig-etl/orchestration/airflow
 cp .env.example .env
 ```
+Then set:
+- `AIRFLOW_UID` to your local user id (`id -u` on macOS/Linux)
+- `IG_ETL_ENV_FILE_HOST_PATH` to your real local env file path
+
+Example:
+```bash
+sed -i.bak "s/^AIRFLOW_UID=.*/AIRFLOW_UID=$(id -u)/" .env
+sed -i.bak "s|^IG_ETL_ENV_FILE_HOST_PATH=.*|IG_ETL_ENV_FILE_HOST_PATH=/Users/mdot/Documents/dev/ig-etl/scratch/.prod.env|" .env
+```
 
 2. Bring up stack:
 ```bash
@@ -70,5 +79,12 @@ docker compose logs -f airflow-scheduler
 Restart stack:
 ```bash
 docker compose down
+docker compose up -d
+```
+
+If permissions were previously broken, reset local stack state:
+```bash
+docker compose down -v
+docker compose up airflow-init
 docker compose up -d
 ```
