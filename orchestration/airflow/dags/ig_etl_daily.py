@@ -16,7 +16,7 @@ IG_ETL_ENV_FILE_HOST_PATH = os.getenv(
 )
 IG_ETL_DAG_CRON = os.getenv("IG_ETL_DAG_CRON", "0 4 * * *")
 
-CONTAINER_ENV_FILE_PATH = "/run/config/.prod.env"
+CONTAINER_ENV_FILE_PATH = "/run/config/prod_env"
 
 
 with DAG(
