@@ -12,7 +12,7 @@ from docker.types import Mount
 IG_ETL_IMAGE = os.getenv("IG_ETL_IMAGE", "ig-etl:dev-local")
 IG_ETL_ENV_FILE_HOST_PATH = os.getenv(
     "IG_ETL_ENV_FILE_HOST_PATH",
-    "/Users/mdot/Documents/dev/ig-etl/scratch/.prod.env",
+    "/home/dev/ig-etl/scratch/.prod.env",
 )
 IG_ETL_DAG_CRON = os.getenv("IG_ETL_DAG_CRON", "0 4 * * *")
 

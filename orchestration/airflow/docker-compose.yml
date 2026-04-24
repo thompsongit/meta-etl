@@ -30,6 +30,8 @@ services:
       _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-apache-airflow-providers-docker}
       AIRFLOW_UID: ${AIRFLOW_UID:-50000}
     user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-0}"
+    group_add:
+      - "${DOCKER_GID:-998}"
     volumes:
       - ./dags:/opt/airflow/dags
       - airflow_logs:/opt/airflow/logs
@@ -67,6 +69,8 @@ services:
       _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-apache-airflow-providers-docker}
       AIRFLOW_UID: ${AIRFLOW_UID:-50000}
     user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-0}"
+    group_add:
+      - "${DOCKER_GID:-998}"
     volumes:
       - ./dags:/opt/airflow/dags
       - airflow_logs:/opt/airflow/logs
@@ -95,6 +99,8 @@ services:
       _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-apache-airflow-providers-docker}
       AIRFLOW_UID: ${AIRFLOW_UID:-50000}
     user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-0}"
+    group_add:
+      - "${DOCKER_GID:-998}"
     volumes:
       - ./dags:/opt/airflow/dags
       - airflow_logs:/opt/airflow/logs
@@ -120,6 +126,8 @@ services:
       _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-apache-airflow-providers-docker}
       AIRFLOW_UID: ${AIRFLOW_UID:-50000}
     user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-0}"
+    group_add:
+      - "${DOCKER_GID:-998}"
     volumes:
       - ./dags:/opt/airflow/dags
       - airflow_logs:/opt/airflow/logs
