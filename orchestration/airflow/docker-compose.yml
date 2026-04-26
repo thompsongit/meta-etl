@@ -29,7 +29,7 @@ services:
       AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "false"
       _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-apache-airflow-providers-docker}
       AIRFLOW_UID: ${AIRFLOW_UID:-50000}
-    user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-0}"
+    user: "${AIRFLOW_DOCKER_USER:-0:0}"
     group_add:
       - "${DOCKER_GID:-998}"
     volumes:
@@ -68,7 +68,7 @@ services:
       AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "false"
       _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-apache-airflow-providers-docker}
       AIRFLOW_UID: ${AIRFLOW_UID:-50000}
-    user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-0}"
+    user: "${AIRFLOW_DOCKER_USER:-0:0}"
     group_add:
       - "${DOCKER_GID:-998}"
     volumes:
@@ -98,7 +98,7 @@ services:
       AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
       _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-apache-airflow-providers-docker}
       AIRFLOW_UID: ${AIRFLOW_UID:-50000}
-    user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-0}"
+    user: "${AIRFLOW_DOCKER_USER:-0:0}"
     group_add:
       - "${DOCKER_GID:-998}"
     volumes:
@@ -125,7 +125,7 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-apache-airflow-providers-docker}
       AIRFLOW_UID: ${AIRFLOW_UID:-50000}
-    user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-0}"
+    user: "${AIRFLOW_DOCKER_USER:-0:0}"
     group_add:
       - "${DOCKER_GID:-998}"
     volumes:

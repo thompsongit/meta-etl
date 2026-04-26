@@ -10,12 +10,12 @@
 - `src/ig_etl/transform.py`: payload-to-row mapping
 
 ### 1) Use the project pyenv
-`.python-version` should point to `ig-etl` and checks should run in that env.
+`.python-version` should point to `3.12.11` and checks should run in that env.
 
+Create a pyenv venv named `ig-etl` from Python `3.12.11` and proceed as  follows:
 ```bash
 pyenv local ig-etl
 pyenv shell ig-etl
-python --version
 ```
 
 ### 2) Install dependencies
@@ -29,7 +29,7 @@ Build locally:
 docker build -t ig-etl:dev-local meta-etl
 ```
 
-Container CLI smoke:
+Container CLI smoke test:
 ```bash
 docker run --rm ig-etl:dev-local --help
 ```

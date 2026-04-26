@@ -13,19 +13,19 @@ This folder runs a standalone Airflow installation that schedules the IG ETL con
 1. Docker is installed and running.
 2. IG ETL container image exists locally:
 ```bash
-docker build -t ig-etl:dev-local meta-etl
+docker build -t ig-etl:dev-local /Users/mdot/Documents/dev/meta-etl
 ```
 3. IG ETL env file exists (default expected path):
-`meta-etl/scratch/.prod.env`
+`/Users/mdot/Documents/dev/meta-etl/.prod.env`
 
 ## First-time setup
 1. Create local Airflow env:
 ```bash
-cd meta-etl/orchestration/airflow
+cd /Users/mdot/Documents/dev/meta-etl/orchestration/airflow
 cp .env.example .env
 ```
 Then set:
-- `AIRFLOW_UID` to the user id (`id -u` on Linux)
+- `AIRFLOW_DOCKER_USER=0:0` for stable Docker socket access on Linux
 - `IG_ETL_ENV_FILE_HOST_PATH` to env file path
 - `DOCKER_GID` to the host docker group id (Linux): `getent group docker | cut -d: -f3`
 
