@@ -54,7 +54,8 @@ python -m ig_etl --env-file /run/config/prod_env
 2. Docker runtime options are controlled from `.env`:
 - `IG_ETL_DOCKER_NETWORK_MODE` (`bridge` or `host`)
 - `IG_ETL_EXTRA_HOST_MAPPING` (default `host.docker.internal:host-gateway`)
-- `IG_ETL_CH_HOST`, `IG_ETL_CH_PORT`, `IG_ETL_CH_SECURE` (these are optional. they're overrides for ETL container)
+- `IG_ETL_CH_HOST`, `IG_ETL_CH_PORT`, `IG_ETL_CH_SECURE` (optional overrides for ETL container)
+- `IG_ETL_CH_CLUSTER`, `IG_ETL_CH_ALT_HOSTS` (optional cluster/failover overrides for ETL container)
 
 ## Local test flow
 1. In the Airflow UI, unpause `ig_etl_daily`.
@@ -102,10 +103,15 @@ IG_ETL_CH_HOST=127.0.0.1
 IG_ETL_CH_PORT=8123
 ```
 
+Cluster-aware (optional in either mode):
+```bash
+IG_ETL_CH_CLUSTER=main_cluster
+IG_ETL_CH_ALT_HOSTS=ch-node-2:8123,ch-node-3:8123
+```
+
 2. Recreate scheduler/webserver/triggerer:
 ```bash
 docker compose up -d --force-recreate airflow-scheduler airflow-webserver airflow-triggerer
 ```
 
 3. Clear and rerun failed task in Airflow UI.
-

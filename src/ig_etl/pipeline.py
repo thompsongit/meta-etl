@@ -59,6 +59,95 @@ from .transform import (
 from .utils import parse_graph_timestamp, utc_now
 
 
+def _parse_host_port(value: str, default_port: int) -> tuple[str, int]:
+    target = value.strip()
+    if not target:
+        raise ValueError("Empty ClickHouse host target in CH_ALT_HOSTS")
+
+    if target.startswith("[") and "]" in target:
+        end = target.find("]")
+        host = target[1:end].strip()
+        remainder = target[end + 1 :].strip()
+        if remainder.startswith(":") and remainder[1:].isdigit():
+            return host, int(remainder[1:])
+        return host, default_port
+
+    host_part, sep, port_part = target.rpartition(":")
+    if sep and host_part and port_part.isdigit():
+        return host_part.strip(), int(port_part)
+    return target, default_port
+
+
+def _clickhouse_targets(config: SyncConfig) -> list[tuple[str, int]]:
+    candidates: list[tuple[str, int]] = [(config.ch_host, config.ch_port)]
+    for alt in config.ch_alt_hosts:
+        candidates.append(_parse_host_port(alt, config.ch_port))
+
+    deduped: list[tuple[str, int]] = []
+    seen: set[tuple[str, int]] = set()
+    for host, port in candidates:
+        normalized = (host.strip(), int(port))
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(normalized)
+    return deduped
+
+
+def _verify_clickhouse_cluster(ch_client: Any, cluster_name: str) -> None:
+    rows = ch_client.query(
+        """
+        SELECT count()
+        FROM system.clusters
+        WHERE cluster = {cluster:String}
+        """,
+        parameters={"cluster": cluster_name},
+    ).result_rows
+    count = int(rows[0][0]) if rows else 0
+    if count <= 0:
+        raise ValueError(
+            f"Configured CH_CLUSTER={cluster_name!r} not found in system.clusters"
+        )
+
+
+def _connect_clickhouse(config: SyncConfig, clickhouse_connect_module: Any) -> Any:
+    targets = _clickhouse_targets(config)
+    last_exc: Exception | None = None
+
+    for host, port in targets:
+        ch_client = None
+        try:
+            ch_client = clickhouse_connect_module.get_client(
+                host=host,
+                port=port,
+                username=config.ch_username,
+                password=config.ch_password,
+                database=config.ch_database,
+                secure=config.ch_secure,
+            )
+            ch_client.command("SELECT 1")
+            if config.ch_cluster:
+                _verify_clickhouse_cluster(ch_client, config.ch_cluster)
+                print(
+                    f"[INFO] clickhouse connected host={host}:{port} "
+                    f"cluster={config.ch_cluster}"
+                )
+            elif len(targets) > 1:
+                print(f"[INFO] clickhouse connected host={host}:{port}")
+            return ch_client
+        except Exception as exc:  # pragma: no cover - runtime/network path
+            last_exc = exc
+            print(f"[WARN] clickhouse connect failed host={host}:{port}: {exc}")
+            if ch_client is not None:
+                try:
+                    ch_client.close()
+                except Exception:
+                    pass
+
+    target_text = ",".join(f"{host}:{port}" for host, port in targets)
+    raise RuntimeError(f"Unable to connect to ClickHouse targets: {target_text}") from last_exc
+
+
 def _build_windows(
     start_dt: datetime,
     end_dt: datetime,
@@ -1618,14 +1707,7 @@ def run_sync(
     ch_client = None
     http_client = None
     try:
-        ch_client = clickhouse_connect_module.get_client(
-            host=config.ch_host,
-            port=config.ch_port,
-            username=config.ch_username,
-            password=config.ch_password,
-            database=config.ch_database,
-            secure=config.ch_secure,
-        )
+        ch_client = _connect_clickhouse(config, clickhouse_connect_module)
         http_client = httpx_module.Client(timeout=config.http_timeout_seconds)
 
         print(f"[INFO] run_id={run_id}")

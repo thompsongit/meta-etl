@@ -41,6 +41,11 @@ docker run --rm --env-file .prod.env ig-etl:dev-local
 
 If ClickHouse is running on host machine, set `CH_HOST=host.docker.internal` in the env file for container runs.
 
+For ClickHouse clusters:
+- Set `CH_CLUSTER=<cluster_name>` (validated on startup via `system.clusters`)
+- Optional failover endpoints: `CH_ALT_HOSTS=ch-node-2:8123,ch-node-3:8123`
+- Ensure schema exists on every failover node. The provided `sql/instagram_clickhouse_ddl.sql` is local-table DDL (no `ON CLUSTER`/`Replicated*` engines).
+
 ### 3) Create tables
 ```bash
 clickhouse-client --queries-file sql/instagram_clickhouse_ddl.sql

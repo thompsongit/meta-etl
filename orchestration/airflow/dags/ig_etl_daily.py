@@ -19,6 +19,8 @@ IG_ETL_DOCKER_NETWORK_MODE = os.getenv("IG_ETL_DOCKER_NETWORK_MODE", "bridge")
 IG_ETL_CH_HOST = os.getenv("IG_ETL_CH_HOST", "").strip()
 IG_ETL_CH_PORT = os.getenv("IG_ETL_CH_PORT", "").strip()
 IG_ETL_CH_SECURE = os.getenv("IG_ETL_CH_SECURE", "").strip()
+IG_ETL_CH_CLUSTER = os.getenv("IG_ETL_CH_CLUSTER", "").strip()
+IG_ETL_CH_ALT_HOSTS = os.getenv("IG_ETL_CH_ALT_HOSTS", "").strip()
 
 _extra_hosts: dict[str, str] = {}
 extra_host_mapping = os.getenv("IG_ETL_EXTRA_HOST_MAPPING", "host.docker.internal:host-gateway")
@@ -37,6 +39,10 @@ if IG_ETL_CH_PORT:
     _container_env["CH_PORT"] = IG_ETL_CH_PORT
 if IG_ETL_CH_SECURE:
     _container_env["CH_SECURE"] = IG_ETL_CH_SECURE
+if IG_ETL_CH_CLUSTER:
+    _container_env["CH_CLUSTER"] = IG_ETL_CH_CLUSTER
+if IG_ETL_CH_ALT_HOSTS:
+    _container_env["CH_ALT_HOSTS"] = IG_ETL_CH_ALT_HOSTS
 
 
 with DAG(

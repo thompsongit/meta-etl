@@ -45,6 +45,8 @@ class SyncConfig:
     ch_password: str
     ch_database: str
     ch_secure: bool
+    ch_cluster: str | None
+    ch_alt_hosts: tuple[str, ...]
 
 
 def _require(name: str, value: str | None) -> str:
@@ -87,6 +89,13 @@ def _parse_csv_list(value: str | None) -> tuple[str, ...]:
         return ()
     items = [part.strip() for part in value.split(",")]
     return tuple(part for part in items if part)
+
+
+def _parse_optional_str(value: str | None) -> str | None:
+    if value is None:
+        return None
+    parsed = value.strip()
+    return parsed or None
 
 
 def load_env_file(path: str, override: bool = False) -> bool:
@@ -250,6 +259,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=os.getenv("CH_SECURE", "false").lower() == "true",
     )
+    parser.add_argument(
+        "--ch-cluster",
+        default=os.getenv("CH_CLUSTER"),
+        help="Optional ClickHouse cluster name to validate against system.clusters",
+    )
+    parser.add_argument(
+        "--ch-alt-hosts",
+        default=os.getenv("CH_ALT_HOSTS", ""),
+        help="Optional comma-separated failover hosts, e.g. ch2:8123,ch3:8123",
+    )
     return parser
 
 
@@ -295,4 +314,6 @@ def parse_config(argv: Sequence[str] | None = None) -> SyncConfig:
         ch_password=args.ch_password,
         ch_database=args.ch_database,
         ch_secure=args.ch_secure,
+        ch_cluster=_parse_optional_str(args.ch_cluster),
+        ch_alt_hosts=_parse_csv_list(args.ch_alt_hosts),
     )

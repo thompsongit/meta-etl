@@ -1,4 +1,7 @@
-CREATE DATABASE IF NOT EXISTS instagram_etl;
+-- For dev where you may have a simpler clickhouse locally
+-- CREATE DATABASE IF NOT EXISTS instagram_etl;
+
+CREATE DATABASE IF NOT EXISTS instagram_etl ON CLUSTER 'ja_analytics';
 USE instagram_etl;
 
 -- -----------------------------------------------------------------------------
