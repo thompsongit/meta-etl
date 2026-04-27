@@ -71,6 +71,8 @@ class ClickHouseSettings:
     password: str
     database: str
     secure: bool
+    cluster: str | None
+    alt_hosts: tuple[str, ...]
     sample_rows: int
     ig_user_id: str
 
@@ -87,6 +89,45 @@ def _parse_csv_list(raw: str | None) -> tuple[str, ...]:
         return ()
     parts = [part.strip() for part in raw.split(",")]
     return tuple(part for part in parts if part)
+
+
+def _parse_optional_str(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    value = raw.strip()
+    return value or None
+
+
+def _parse_host_port(value: str, default_port: int) -> tuple[str, int]:
+    target = value.strip()
+    if not target:
+        raise ValueError("Empty ClickHouse host target in CH_ALT_HOSTS")
+    if target.startswith("[") and "]" in target:
+        end = target.find("]")
+        host = target[1:end].strip()
+        remainder = target[end + 1 :].strip()
+        if remainder.startswith(":") and remainder[1:].isdigit():
+            return host, int(remainder[1:])
+        return host, default_port
+    host_part, sep, port_part = target.rpartition(":")
+    if sep and host_part and port_part.isdigit():
+        return host_part.strip(), int(port_part)
+    return target, default_port
+
+
+def _clickhouse_targets(settings: ClickHouseSettings) -> list[tuple[str, int]]:
+    targets: list[tuple[str, int]] = [(settings.host, settings.port)]
+    for alt in settings.alt_hosts:
+        targets.append(_parse_host_port(alt, settings.port))
+    deduped: list[tuple[str, int]] = []
+    seen: set[tuple[str, int]] = set()
+    for host, port in targets:
+        normalized = (host.strip(), int(port))
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(normalized)
+    return deduped
 
 
 def _build_api_settings(args: argparse.Namespace) -> ApiSettings:
@@ -116,6 +157,11 @@ def _build_api_settings(args: argparse.Namespace) -> ApiSettings:
 
 
 def _build_ch_settings(args: argparse.Namespace) -> ClickHouseSettings:
+    raw_alt_hosts = (
+        args.ch_alt_hosts
+        if args.ch_alt_hosts is not None
+        else os.getenv("CH_ALT_HOSTS", "")
+    )
     return ClickHouseSettings(
         host=args.ch_host or _require_env("CH_HOST"),
         port=int(args.ch_port or os.getenv("CH_PORT", "8123")),
@@ -125,9 +171,60 @@ def _build_ch_settings(args: argparse.Namespace) -> ClickHouseSettings:
         secure=(str(args.ch_secure).lower() == "true")
         if args.ch_secure is not None
         else os.getenv("CH_SECURE", "false").lower() == "true",
+        cluster=_parse_optional_str(
+            args.ch_cluster if args.ch_cluster is not None else os.getenv("CH_CLUSTER")
+        ),
+        alt_hosts=_parse_csv_list(raw_alt_hosts),
         sample_rows=max(1, args.raw_sample_rows),
         ig_user_id=args.ig_user_id or _require_env("IG_USER_ID"),
     )
+
+
+def _verify_cluster(ch_client: Any, cluster_name: str) -> None:
+    rows = ch_client.query(
+        """
+        SELECT count()
+        FROM system.clusters
+        WHERE cluster = {cluster:String}
+        """,
+        parameters={"cluster": cluster_name},
+    ).result_rows
+    count = int(rows[0][0]) if rows else 0
+    if count <= 0:
+        raise ValueError(
+            f"Configured CH_CLUSTER={cluster_name!r} not found in system.clusters"
+        )
+
+
+def _connect_clickhouse(settings: ClickHouseSettings) -> Any:
+    targets = _clickhouse_targets(settings)
+    last_exc: Exception | None = None
+
+    for host, port in targets:
+        ch_client = None
+        try:
+            ch_client = clickhouse_connect.get_client(
+                host=host,
+                port=port,
+                username=settings.username,
+                password=settings.password,
+                database=settings.database,
+                secure=settings.secure,
+            )
+            ch_client.command("SELECT 1")
+            if settings.cluster:
+                _verify_cluster(ch_client, settings.cluster)
+            return ch_client
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if ch_client is not None:
+                try:
+                    ch_client.close()
+                except Exception:
+                    pass
+
+    target_text = ",".join(f"{host}:{port}" for host, port in targets)
+    raise RuntimeError(f"Unable to connect to ClickHouse targets: {target_text}") from last_exc
 
 
 def _new_schema_node() -> dict[str, Any]:
@@ -799,6 +896,7 @@ def run_raw_audit(settings: ClickHouseSettings) -> dict[str, Any]:
     output: dict[str, Any] = {
         "mode": "raw_clickhouse",
         "database": settings.database,
+        "cluster": settings.cluster,
         "ig_user_id": settings.ig_user_id,
         "generated_at": utc_now().isoformat(),
         "tables": {},
@@ -902,14 +1000,7 @@ def run_raw_audit(settings: ClickHouseSettings) -> dict[str, Any]:
         },
     }
 
-    ch_client = clickhouse_connect.get_client(
-        host=settings.host,
-        port=settings.port,
-        username=settings.username,
-        password=settings.password,
-        database=settings.database,
-        secure=settings.secure,
-    )
+    ch_client = _connect_clickhouse(settings)
     try:
         for table, spec in table_specs.items():
             errors: list[str] = []
@@ -968,6 +1059,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ch-password", default=None)
     parser.add_argument("--ch-database", default=None)
     parser.add_argument("--ch-secure", default=None)
+    parser.add_argument("--ch-cluster", default=None)
+    parser.add_argument("--ch-alt-hosts", default=None)
     parser.add_argument("--raw-sample-rows", type=int, default=1000)
 
     return parser
