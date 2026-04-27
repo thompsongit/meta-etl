@@ -10,12 +10,12 @@
 - `src/ig_etl/transform.py`: payload-to-row mapping
 
 ### 1) Use the project pyenv
-`.python-version` should point to `ig-etl` and checks should run in that env.
+`.python-version` should point to `3.12.11` and checks should run in that env.
 
+Create a pyenv venv named `ig-etl` from Python `3.12.11` and proceed as  follows:
 ```bash
 pyenv local ig-etl
 pyenv shell ig-etl
-python --version
 ```
 
 ### 2) Install dependencies
@@ -26,17 +26,17 @@ pip install -r requirements.txt
 ### Container image (Airflow runtime contract)
 Build locally:
 ```bash
-docker build -t ig-etl:dev-local meta-etl
+docker build -t ig-etl:dev-local .
 ```
 
-Container CLI smoke:
+Container CLI smoke test:
 ```bash
 docker run --rm ig-etl:dev-local --help
 ```
 
 Run sync via container:
 ```bash
-docker run --rm --env-file meta-etl/.prod.env ig-etl:dev-local
+docker run --rm --env-file .prod.env ig-etl:dev-local
 ```
 
 If ClickHouse is running on host machine, set `CH_HOST=host.docker.internal` in the env file for container runs.
