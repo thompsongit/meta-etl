@@ -26,7 +26,7 @@ pip install -r requirements.txt
 ### Container image (Airflow runtime contract)
 Build locally:
 ```bash
-docker build -t ig-etl:dev-local meta-etl
+docker build -t ig-etl:dev-local .
 ```
 
 Container CLI smoke test:
@@ -36,7 +36,7 @@ docker run --rm ig-etl:dev-local --help
 
 Run sync via container:
 ```bash
-docker run --rm --env-file meta-etl/.prod.env ig-etl:dev-local
+docker run --rm --env-file .prod.env ig-etl:dev-local
 ```
 
 If ClickHouse is running on host machine, set `CH_HOST=host.docker.internal` in the env file for container runs.
