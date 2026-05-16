@@ -12,7 +12,7 @@ from docker.types import Mount
 FB_ETL_IMAGE = os.getenv("FB_ETL_IMAGE", "fb-etl:dev-local")
 FB_ETL_ENV_FILE_HOST_PATH = os.getenv(
     "FB_ETL_ENV_FILE_HOST_PATH",
-    "/home/dev/meta-etl/.prod.fb.env",
+    "/root/meta-etl/.prod.fb.env",
 )
 FB_ETL_DAG_CRON = os.getenv("FB_ETL_DAG_CRON", "0 5 * * *")
 FB_ETL_DOCKER_NETWORK_MODE = os.getenv("FB_ETL_DOCKER_NETWORK_MODE", "bridge")
