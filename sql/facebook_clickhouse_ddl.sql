@@ -1,8 +1,8 @@
 -- For dev where you may have a simpler ClickHouse locally:
-CREATE DATABASE IF NOT EXISTS facebook_dev;
---CREATE DATABASE IF NOT EXISTS facebook_etl ON CLUSTER 'ja_analytics';
-USE facebook_dev;
---USE facebook_etl;
+--CREATE DATABASE IF NOT EXISTS facebook_dev;
+CREATE DATABASE IF NOT EXISTS facebook_etl ON CLUSTER 'ja_analytics';
+--USE facebook_dev;
+USE facebook_etl;
 
 -- -----------------------------------------------------------------------------
 -- Internal pipeline control/state tables (shared across ETLs)
