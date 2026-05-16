@@ -102,7 +102,7 @@ def build_post_rows(
         )
         reactions_count = _nested_total_count(post, "reactions")
         comments_count = _nested_total_count(post, "comments")
-        attachments_json = json_compact(post.get("attachments", {}))
+        #attachments_json = json_compact(post.get("attachments", {}))
 
         raw_rows.append(
             (
@@ -112,12 +112,12 @@ def build_post_rows(
                 post.get("story"),
                 post.get("permalink_url"),
                 post.get("status_type"),
-                post.get("type"),
+                #post.get("type"),
                 post.get("full_picture"),
                 shares_count,
                 reactions_count,
                 comments_count,
-                attachments_json,
+                #attachments_json,
                 created_at,
                 updated_at,
                 json_compact(post),
@@ -133,12 +133,12 @@ def build_post_rows(
                 post.get("story"),
                 post.get("permalink_url"),
                 post.get("status_type"),
-                post.get("type"),
+                #post.get("type"),
                 post.get("full_picture"),
                 shares_count,
                 reactions_count,
                 comments_count,
-                attachments_json,
+                #attachments_json,
                 created_at,
                 updated_at,
                 ingested_at,

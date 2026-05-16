@@ -22,9 +22,9 @@ PAGE_FIELDS_CANDIDATES = [
 
 POST_FIELDS_CANDIDATES = [
     (
-        "id,message,story,status_type,type,created_time,updated_time,permalink_url,"
+        "id,message,story,status_type,created_time,updated_time,permalink_url,"
         "full_picture,shares,reactions.summary(true).limit(0),"
-        "comments.summary(true).limit(0),attachments"
+        "comments.summary(true).limit(0)"
     ),
     "id,message,story,status_type,type,created_time,updated_time,permalink_url,full_picture,shares",
     "id,message,created_time,updated_time,permalink_url",

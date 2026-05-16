@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+import traceback
 import uuid
 from datetime import datetime, timedelta
 from typing import Any
@@ -526,7 +526,7 @@ def _sync_window(
             "shares_count",
             "reactions_count",
             "comments_count",
-            "attachments_json",
+            #"attachments_json", #not needed
             "source_created_at",
             "source_updated_at",
             "payload_json",
@@ -545,12 +545,12 @@ def _sync_window(
             "story",
             "permalink_url",
             "status_type",
-            "post_type",
+            #"post_type",
             "full_picture",
             "shares_count",
             "reactions_count",
             "comments_count",
-            "attachments_json",
+            #"attachments_json", #not needed
             "source_created_at",
             "source_updated_at",
             "version_ts",
@@ -1006,7 +1006,7 @@ def run_sync(
                 if not config.disable_comments and not comments_permission_skipped:
                     current_comments_cursor_ts = window.end
 
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  
                 error_message = str(exc)[:4000]
                 complete_stream_window(
                     ch_client,
@@ -1056,7 +1056,7 @@ def run_sync(
         print(f"[INFO] rows_loaded_curated={counters.rows_loaded_curated}")
         return 0
 
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  
         finished_at = utc_now()
         error_message = str(exc)[:4000]
         if ch_client is not None:
@@ -1076,8 +1076,10 @@ def run_sync(
                     finished_at=finished_at,
                 )
             except Exception:
+                #traceback.print_exc()
                 pass
         print(f"[ERROR] sync failed: {exc}")
+        #traceback.print_exc() #sexy debugging
         return 1
     finally:
         if http_client is not None:

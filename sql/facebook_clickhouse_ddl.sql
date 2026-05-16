@@ -1,8 +1,8 @@
 -- For dev where you may have a simpler ClickHouse locally:
 CREATE DATABASE IF NOT EXISTS facebook_dev;
-
---CREATE DATABASE IF NOT EXISTS facebook_tel ON CLUSTER 'ja_analytics';
+--CREATE DATABASE IF NOT EXISTS facebook_etl ON CLUSTER 'ja_analytics';
 USE facebook_dev;
+--USE facebook_etl;
 
 -- -----------------------------------------------------------------------------
 -- Internal pipeline control/state tables (shared across ETLs)
@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS raw_fb_page_posts
     shares_count Nullable(UInt64),
     reactions_count Nullable(UInt64),
     comments_count Nullable(UInt64),
-    attachments_json String DEFAULT '{}',
+    --attachments_json String DEFAULT '{}', -- not needed
     source_created_at Nullable(DateTime64(3, 'UTC')),
     source_updated_at Nullable(DateTime64(3, 'UTC')),
     payload_json String,
@@ -242,12 +242,12 @@ CREATE TABLE IF NOT EXISTS curated_fb_page_posts_current
     story Nullable(String),
     permalink_url Nullable(String),
     status_type Nullable(String),
-    --post_type Nullable(String), removed on v3.3 of FB API
+    --post_type Nullable(String), --removed on v3.3 of FB API
     full_picture Nullable(String),
     shares_count Nullable(UInt64),
     reactions_count Nullable(UInt64),
     comments_count Nullable(UInt64),
-    attachments_json String DEFAULT '{}',
+    --attachments_json String DEFAULT '{}', --not needed
     source_created_at Nullable(DateTime64(3, 'UTC')),
     source_updated_at Nullable(DateTime64(3, 'UTC')),
     version_ts DateTime64(3, 'UTC')
