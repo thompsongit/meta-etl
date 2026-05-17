@@ -1,3 +1,6 @@
+[![ig-etl-image](https://github.com/thompsongit/meta-etl/actions/workflows/ig-etl-image.yml/badge.svg?branch=main)](https://github.com/thompsongit/meta-etl/actions/workflows/ig-etl-image.yml)
+[![fb-etl-image](https://github.com/thompsongit/meta-etl/actions/workflows/fb-etl-image.yml/badge.svg?branch=main)](https://github.com/thompsongit/meta-etl/actions/workflows/fb-etl-image.yml)
+
 ## Instagram/Facebook -> ClickHouse ETL/CDC
 
 ### Project layout
