@@ -3,3 +3,7 @@ __pycache__/
 *.pyc
 .env
 .prod.env
+.prod.fb.env
+sync.sh
+.DS_Store
+DS_Store/
